@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import * as endpoints from './endpoints';
-import { tokenStorage } from './tokens';
+import { tokenStorage, __resetBootstrapForTests } from './tokens';
 
 describe('frontend api endpoints', () => {
   it('does not expose a runtime toggleDummyData helper', () => {
@@ -17,7 +17,7 @@ describe('frontend api endpoints', () => {
       },
     ];
 
-    global.fetch = vi.fn().mockResolved({
+    global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => mockResponse,
@@ -42,34 +42,34 @@ describe('frontend api endpoints', () => {
       role: 'issuer',
     };
     const fetchMock = vi.fn()
-      .mockResolvedOnce({
+      .mockResolvedValueOnce({
         ok: false,
         status: 401,
         statusText: 'Unauthorized',
         json: async () => ({ message: 'Unauthorized', statusCode: 401 }),
       })
-      .mockResolvedOnce({
+      .mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({ accessToken: 'fresh-token', user: refreshedUser }),
       })
-      .mockResolvedOnce({
+      .mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({ result: 'success' }),
       });
     global.fetch = fetchMock as unknown as typeof global.fetch;
 
-    await expect(endpoints.apiClient('/protected')).toResolveToEqual({ result: 'success' });
+    await expect(endpoints.apiClient.get('/protected')).resolves.toEqual({ result: 'success' });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0][1]?.headers).toBeInstanceOf(Headers);
+    expect(fetchMock.mock.calls[0][1]?.headers).toBleInstanceOf(Headers);
     expect((fetchMock.mock.calls[2][1]?.headers as Headers).get('Authorization'))
       .toBe('Bearer fresh-token');
   });
 
   it('encodes reserved characters in certificate serial numbers', async () => {
-    const fetchMock = vi.fn().mockResolved({
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ isValid: true }),
@@ -84,7 +84,7 @@ describe('frontend api endpoints', () => {
   });
 
   it('exposes a single dashboard stats fetcher that hits the canonical endpoint', async () => {
-    const fetchMock = vi.fn().mockResolved({
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ totalCertificates: 0 }),
@@ -103,4 +103,67 @@ describe('frontend api endpoints', () => {
     const analyticsApi = (endpoints as Record<string, unknown>).analyticsApi as Record<string, unknown> | undefined;
     expect(analyticsApi?.getDashboardSummary).toBeUndefined();
   });
-})
+
+  it('bootstraps the access token via a single /auth/refresh on initial mount', async () => {
+    tokenStorage.clearTokens();
+    __resetBootstrapForTests();
+    const refreshedUser = {
+      id: 'user-1',
+      email: 'user@example.com',
+      firstName: 'Test',
+      lastName: 'User',
+      role: 'issuer',
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accessToken: 'bootstrap-token', user: refreshedUser }),
+    });
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const result = await endpoints.bootstrapAuth();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/auth/refresh');
+    expect(result).toEqual({ accessToken: 'bootstrap-token', user: refreshedUser });
+    expect(tokenStorage.getAccessToken()).toBe('bootstrap-token');
+  });
+
+  it('resolves bootstrap to null with no access token when /auth/refresh returns 401', async () => {
+    tokenStorage.clearTokens();
+    __resetBootstrapForTests();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: async () => ({ message: 'Unauthorized', statusCode: 401 }),
+    });
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const result = await endpoints.bootstrapAuth();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result).toBeNull();
+    expect(tokenStorage.getAccessToken()).toBeNull();
+  });
+
+  it('deduplicates concurrent bootstrap calls to a single /auth/refresh request', async () => {
+    tokenStorage.clearTokens();
+    __resetBootstrapForTests();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accessToken: 'shared-token', user: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const [a, b] = await Promise.all([
+      endpoints.bootstrapAuth(),
+      endpoints.bootstrapAuth(),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(a).toEqual(b);
+    expect(tokenStorage.getAccessToken()).toBe('shared-token');
+  });
+});

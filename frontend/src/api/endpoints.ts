@@ -90,6 +90,22 @@ export const AUTH_ENDPOINTS = {
  */
 let _refreshInFlight: Promise<AuthResponse> | null = null;
 
+/**
+ * Whether the app has completed its one explicit bootstrap refresh.
+ *
+ * Protected requests must not each trigger their own refresh on a cold page
+ * load: the endpoint is IP-rate-limited, so a page full of 401s would trip a
+ * 429. AuthContext performs the single bootstrap refresh before rendering
+ * routes; until that has settled, protected requests wait on it instead of
+ * racing their own refresh calls.
+ */
+let _bootstrapSettled = false;
+let _bootstrapPromise: Promise<void> | null = null;
+
+const markBootstrapSettled = (): void => {
+  _bootstrapSettled = true;
+};
+
 const refreshTokens = async (): Promise<AuthResponse> => {
   if (_refreshInFlight) return _refreshInFlight;
 
@@ -101,6 +117,12 @@ const refreshTokens = async (): Promise<AuthResponse> => {
   });
 
   return _refreshInFlight;
+};
+
+const waitForBootstrap = async (): Promise<void> => {
+  if (_bootstrapSettled) return;
+  if (_bootstrapPromise) return _bootstrapPromise;
+  return Promise.resolve();
 };
 
 /**
@@ -124,6 +146,10 @@ export async function apiClient<T>(
 
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
+
+  if (!options.skipAuth) {
+    await waitForBootstrap();
+  }
 
   if (!options.skipAuth) {
     const token = tokenStorage.getAccessToken();
@@ -166,6 +192,7 @@ export async function apiClient<T>(
       if (response.status === 401 && !hasTriedRefresh && !options.skipAuth) {
         try {
           const refreshResponse = await refreshTokens();
+          markBootstrapSettled();
           tokenStorage.setAccessToken(refreshResponse.accessToken);
           headers.set("Authorization", `Bearer ${refreshResponse.accessToken}`);
           // Forward the fresh user too so AuthContext updates both the user
@@ -228,6 +255,10 @@ export async function apiClientRaw(
   const headers = new Headers(options.headers);
 
   if (!options.skipAuth) {
+    await waitForBootstrap();
+  }
+
+  if (!options.skipAuth) {
     const token = tokenStorage.getAccessToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
   }
@@ -241,6 +272,7 @@ export async function apiClientRaw(
   if (response.status === 401 && !options.skipAuth) {
     try {
       const refreshResponse = await refreshTokens();
+      markBootstrapSettled();
       tokenStorage.setAccessToken(refreshResponse.accessToken);
       headers.set("Authorization", `Bearer ${refreshResponse.accessToken}`);
       notifyTokenRefreshed(refreshResponse.accessToken, refreshResponse.user);
@@ -987,8 +1019,23 @@ export const authApi = {
    * Establish the session during AuthProvider's initial bootstrap.
    * The HttpOnly refresh-token cookie is sent by the browser and the returned
    * access token remains in memory, preserving the XSS-hardening design.
+   *
+   * This is the single explicit refresh the app performs on mount. It is
+   * idempotent and coalesced: concurrent callers share one in-flight request,
+   * and once it settles, protected requests stop waiting on bootstrap and
+   * assume a valid token (or a genuinely unauthenticated session).
    */
-  bootstrapAuth: (): Promise<AuthResponse> => refreshTokens(),
+  bootstrapAuth: (): Promise<AuthResponse> => {
+    if (!_bootstrapPromise) {
+      _bootstrapPromise = refreshTokens()
+        .then(() => undefined)
+        .catch(() => undefined)
+        .finally(() => {
+          markBootstrapSettled();
+        });
+    }
+    return refreshTokens();
+  },
   // Keep the legacy refresh entry point for existing callers/tests.
   refresh: (): Promise<AuthResponse> => refreshTokens(),
   logout: async (): Promise<void> => {
@@ -1002,6 +1049,7 @@ export const authApi = {
       }
     } finally {
       tokenStorage.clearTokens();
+      markBootstrapSettled();
     }
   },
   forgotPassword: async (
