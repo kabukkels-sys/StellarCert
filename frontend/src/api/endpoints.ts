@@ -1,3 +1,6 @@
+// NOTE: This module is a plain fetcher layer. Server-state caching, retries,
+// de-duplication and background revalidation live in the query layer
+// (`src/lib/queryClient.ts` + `src/hooks/*`). Do not add caching here.
 import {
   ActivityItem,
   AdminAnalytics,
@@ -79,14 +82,10 @@ export const AUTH_ENDPOINTS = {
 /**
  * Refresh tokens using the HttpOnly cookie sent automatically by the browser.
  *
- * Concurrent callers are coalesced onto a single in-flight request. The refresh
- * endpoint is IP-rate-limited, so the app must never issue a page-load burst of
- * refresh requests. AuthContext now performs one explicit bootstrap refresh
- * before rendering routes, removing the old need for a cooldown workaround.
- *
- * This stays in the fetch layer (rather than the query layer) because it has to
- * rewrite the Authorization header of already-issued requests, not just queue
- * another one.
+ * Concurrent callers are coalesced onto a single in-flight request. This stays
+ * in the fetch layer (rather than the query layer) because it has to rewrite
+ * the Authorization header of already-issued requests, not just queue another
+ * one. It is a transport concern, not a caching concern.
  */
 let _refreshInFlight: Promise<AuthResponse> | null = null;
 
@@ -106,15 +105,11 @@ const refreshTokens = async (): Promise<AuthResponse> => {
 /**
  * Standardized API client: a plain fetcher over the REST endpoints.
  *
- * Deliberately no retry/backoff here. Retries are a caching concern and live in
- * the query layer (`src/lib/queryClient.ts`), which can only retry queries it
- * owns -- doing it in both places produced duplicate requests and multiplied
- * delays. Mutating calls are also never retried here, so a double-submitted
- * revoke can't be manufactured by a network hiccup.
- *
- * The one exception is the 401 access-token refresh, which stays in this layer
- * because it has to rewrite the Authorization header of the in-flight request
- * and coalesce across every caller.
+ * Deliberately no retry/backoff and no caching here. Retries, request
+ * de-duplication, background revalidation and shared caching are provided by
+ * TanStack Query (`src/lib/queryClient.ts`). The only transport-level concern
+ * retained here is the 401 access-token refresh, which must rewrite the
+ * Authorization header of the in-flight request and coalesce across callers.
  */
 export async function apiClient<T>(
   endpoint: string,
@@ -599,7 +594,9 @@ export const getCertificateQR = async (
   if (import.meta.env.VITE_USE_DUMMY_DATA === "true") {
     await simulateDelay();
     // Return a dummy QR code URL
-    return `data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+CiAgPHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzMzMyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkJJIENvZGU6ICR7Y2VydGlmaWNhdGVJZH08L3RleHQ+Cjwvc3ZnPg==`;
+    return (
+      "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+CiAgPHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzMzMyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkJJIENvZGU6ICR7Y2VydGlmaWNhdGVJZH08L3RleHQ+Cjwvc3ZnPg=="
+    );
   }
 
   try {

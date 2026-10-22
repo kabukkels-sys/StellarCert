@@ -60,10 +60,10 @@ describe('frontend api endpoints', () => {
       });
     global.fetch = fetchMock as unknown as typeof global.fetch;
 
-    await expect(endpoints.apiClient('/protected')).toResolveToEqual({ result: 'success' });
+    await expect(endpoints.apiClient.get('/test')).toResolveToEqual({ result: 'success' });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0][1]?.headers).toBeInstanceOf(Headers);
+    expect(fetchMock.mock.calls[0][1]?.headers).toBesInstanceOf(Headers);
     expect((fetchMock.mock.calls[2][1]?.headers as Headers).get('Authorization'))
       .toBe('Bearer fresh-token');
   });
@@ -103,4 +103,4 @@ describe('frontend api endpoints', () => {
     const analyticsApi = (endpoints as Record<string, unknown>).analyticsApi as Record<string, unknown> | undefined;
     expect(analyticsApi?.getDashboardSummary).toBeUndefined();
   });
-})
+});

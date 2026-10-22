@@ -1,5 +1,6 @@
 import { Routes, Route, useLocation } from "react-router-dom";
 import { Suspense, lazy } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Shield, Award, Search, ShieldAlert } from "lucide-react";
 import Navbar from "./components/Header";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -36,6 +37,20 @@ const PageLoader = () => (
   </div>
 );
 
+// Shared server-state cache. A single client instance lives for the lifetime
+// of the app so sibling components and route transitions reuse cached data
+// instead of refetching on every mount.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 2,
+    },
+  },
+});
+
 function App() {
   const location = useLocation();
   const showFeatureOverview =
@@ -43,7 +58,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors duration-250">
-      <AuthProvider>
+      <QueryClientProvider client={queryClient}>
         <NotificationProvider>
           <Navbar />
           <div className="container mx-auto px-4 py-8">
@@ -181,7 +196,7 @@ function App() {
           )}
           <ToastContainer />
         </NotificationProvider>
-      </AuthProvider>
+      </QueryClientProvider>
     </div>
   );
 }
