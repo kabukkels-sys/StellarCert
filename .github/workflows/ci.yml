@@ -103,6 +103,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install frontend dependencies
         run: npm ci
+      - name: Audit frontend dependencies (fail on high or critical)
+        run: npm audit --audit-level=high
       - name: Lint frontend
         run: npm run lint -- --max-warnings 0
       - name: Verify ESLint flat config
@@ -139,6 +141,8 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install backend dependencies
         run: npm ci
+      - name: Audit backend dependencies (fail on high or critical)
+        run: npm audit --audit-level=high
       - name: Lint backend
         run: npm run lint -- --max-warnings 0
       - name: Typecheck backend
@@ -221,6 +225,8 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install backend dependencies
         run: npm ci
+      - name: Audit backend dependencies (fail on high or critical)
+        run: npm audit --audit-level=high
       - name: Run backend e2e tests
         run: npm run test:e2e -- --ci --runInBand
 
