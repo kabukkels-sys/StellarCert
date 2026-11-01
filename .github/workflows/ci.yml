@@ -423,7 +423,7 @@ jobs:
           DIGEST="$(sha256sum dist/release-manifest.json | cut -d' ' -f1)"
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: 'dist/**'
       - name: Upload release artifacts
