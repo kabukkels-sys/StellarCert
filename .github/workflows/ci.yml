@@ -340,7 +340,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push backend image
         id: backend-image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           target: production
@@ -356,7 +356,7 @@ jobs:
             ghcr.io/${{ github.repository }}/backend:sha-${{ steps.meta.outputs.source-revision }}
       - name: Build and push frontend image
         id: frontend-image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./frontend
           target: production
